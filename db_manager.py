@@ -10,16 +10,16 @@ class DBManager:
         }
 
     def executar_query(self, sql):
-        conn = None
+        connector = None
         try:
-            conn = mysql.connector.connect(**self.config)
+            connector = mysql.connector.connect(**self.config)
             cursor = conn.cursor(dictionary=True)
             
             # Se for SELECT
             if sql.strip().upper().startswith("SELECT"):
                 cursor.execute(sql)
-                result = cursor.fetchall()
-                return {"status": "OK", "dados": result}
+                resultado = cursor.fetchall()
+                return {"status": "OK", "dados": resultado}
             
             # Se for INSERT/UPDATE/DELETE
             else:
@@ -30,6 +30,6 @@ class DBManager:
         except mysql.connector.Error as err:
             return {"status": "ERRO", "mensagem": str(err)}
         finally:
-            if conn and conn.is_connected():
+            if connector and connector.is_connected():
                 cursor.close()
                 conn.close()

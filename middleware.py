@@ -6,16 +6,14 @@ import time
 import sys
 from db_manager import DBManager
 
-# --- CONFIGURAÇÃO ---
-# ATENÇÃO: Em produção, substitua 'localhost' pelos IPs reais das máquinas.
+# Configuração dos hosts
 NODES_CONFIG = {
     "1": {"ip": "192.168.15.48", "port": 5001, "db_host": "localhost"},
     "2": {"ip": "192.168.15.6", "port": 5001, "db_host": "localhost"}
-    # Adicione mais nós se necessário...
 }
 
-DB_USER = "labsd"       # <--- SEU USUARIO
-DB_PASS = "labsd"       # <--- SUA SENHA
+DB_USER = "labsd"    
+DB_PASS = "labsd"  
 DB_NAME = "ddb"
 
 class NodeMiddleware:
@@ -23,29 +21,29 @@ class NodeMiddleware:
         self.id = node_id
         self.ip = NODES_CONFIG[node_id]["ip"]
         self.port = NODES_CONFIG[node_id]["port"]
-        # Lista de IDs dos outros nós (Peers)
+        # Lista de IDs dos outros nós
         self.peers = [nid for nid in NODES_CONFIG if nid != node_id] 
         
         # Conexão com o Banco de Dados Local
-        print(f" [*] Conectando ao MySQL local ({NODES_CONFIG[node_id]['db_host']})...")
+        print(f" [INFO] Conectando ao MySQL local ({NODES_CONFIG[node_id]['db_host']}).")
         self.db = DBManager(NODES_CONFIG[node_id]["db_host"], DB_USER, DB_PASS, DB_NAME)
         
         # Estado do Nó
-        self.coordinator_id = self.id # Começa achando que é o líder até provarem o contrário
+        self.coordenador_id = self.id # Inicia como lider
         self.active_nodes = {}
         
     def calcular_checksum(self, payload):
-        """ Gera MD5 do payload para garantir integridade """
+        # Função para verificar a carga com checksum
         dump = json.dumps(payload, sort_keys=True).encode()
         return hashlib.md5(dump).hexdigest()
 
     def enviar_mensagem(self, target_node_id, tipo, payload):
-        """ Função genérica para enviar JSON via Socket """
+        # Função para enviar uma mensagem para outro nó
         target = NODES_CONFIG[target_node_id]
         try:
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.settimeout(2) # Timeout curto para não travar o sistema
-            client.connect((target['ip'], target['port']))
+            cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            cliente.settimeout(2) # Timeout curto para não travar o sistema
+            cliente.connect((target['ip'], target['port']))
             
             msg = {
                 "tipo": tipo,
@@ -53,25 +51,22 @@ class NodeMiddleware:
                 "payload": payload,
                 "checksum": self.calcular_checksum(payload)
             }
-            client.send(json.dumps(msg).encode())
+            cliente.send(json.dumps(msg).encode())
             
-            # Se for uma QUERY, o cliente espera resposta imediata (síncrono)
+            # Se for uma QUERY, o cliente espera resposta
             if tipo == "QUERY_REQ":
-                resp_raw = client.recv(409600).decode() # Buffer grande para respostas
-                client.close()
+                resp_raw = cliente.recv(409600).decode()
+                cliente.close()
                 return json.loads(resp_raw)
                 
-            client.close()
-            return True # Sucesso
+            cliente.close()
+            return True 
         
         except Exception as e:
-            # Em caso de erro (nó offline), apenas retorna None
+            # Caso o nó esteja offline, apenas retorna None
             return None
 
-    # -------------------------------------------------------------------------
-    # SERVIDOR (Ouvido do Middleware)
-    # -------------------------------------------------------------------------
-    def start_server(self):
+   def start_server(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             server.bind((self.ip, self.port))
@@ -79,19 +74,19 @@ class NodeMiddleware:
             print(f"[*] Servidor Middleware rodando em {self.ip}:{self.port}")
             
             while True:
-                client_sock, addr = server.accept()
+                cliente_sock, addr = server.accept()
                 # Cria uma thread para cada requisição recebida
-                t = threading.Thread(target=self.handle_client, args=(client_sock,))
+                t = threading.Thread(target=self.handle_cliente, args=(cliente_sock,))
                 t.daemon = True
                 t.start()
         except Exception as e:
             print(f" [FATAL] Erro ao iniciar servidor: {e}")
             sys.exit(1)
 
-    def handle_client(self, client_sock):
+    def handle_cliente(self, cliente_sock):
         try:
             # Buffer aumentado para receber grandes cargas de dados (SYNC)
-            data = client_sock.recv(409600).decode() 
+            data = cliente_sock.recv(409600).decode() 
             if not data: return
             msg = json.loads(data)
             
@@ -117,12 +112,12 @@ class NodeMiddleware:
                 if sql.strip().upper().startswith("SELECT"):
                     res = self.db.executar_query(sql)
                     resp = {"node_exec": self.id, "result": res}
-                    client_sock.send(json.dumps(resp).encode())
+                    cliente_sock.send(json.dumps(resp).encode())
                 
                 # ESCRITA (INSERT/UPDATE)
                 else:
                     # Se SOU o Coordenador: Executo e Replico
-                    if self.id == self.coordinator_id:
+                    if self.id == self.coordenador_id:
                         print(" [MASTER] Executando escrita e replicando...")
                         res = self.db.executar_query(sql)
                         
@@ -132,13 +127,13 @@ class NodeMiddleware:
                                            args=(peer, "REPLICATE", {"sql": sql})).start()
                         
                         resp = {"node_exec": f"{self.id} (MASTER)", "result": res}
-                        client_sock.send(json.dumps(resp).encode())
+                        cliente_sock.send(json.dumps(resp).encode())
                     
                     # Se NÃO sou Coordenador: Repasso para ele
                     else:
-                        print(f" [SLAVE] Redirecionando escrita para Mestre {self.coordinator_id}...")
-                        resp = self.enviar_mensagem(self.coordinator_id, "QUERY_REQ", payload)
-                        client_sock.send(json.dumps(resp).encode())
+                        print(f" [SLAVE] Redirecionando escrita para Mestre {self.coordenador_id}...")
+                        resp = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload)
+                        cliente_sock.send(json.dumps(resp).encode())
 
             elif tipo == "REPLICATE":
                 print(f" [REPLICA] Gravando no banco local: {payload['sql']}")
@@ -148,13 +143,13 @@ class NodeMiddleware:
             
             elif tipo == "WHO_IS_MASTER":
                 # Se eu sou o mestre, eu respondo.
-                if self.id == self.coordinator_id:
+                if self.id == self.coordenador_id:
                     print(f" [MASTER] Nó {origem} perguntou quem manda. Respondendo...")
                     # Respondo direto pra quem perguntou (não broadcast)
                     self.enviar_mensagem(origem, "COORDINATOR_ANNOUNCE", {})
 
             elif tipo == "COORDINATOR_ANNOUNCE":
-                self.coordinator_id = origem
+                self.coordenador_id = origem
                 # print(f" [INFO] Coordenador confirmado: {origem}")
 
             elif tipo == "SYNC_REQ":
@@ -181,13 +176,13 @@ class NodeMiddleware:
                     self.start_election()
             
             elif tipo == "COORDINATOR":
-                self.coordinator_id = origem
+                self.coordenador_id = origem
                 print(f" [ELEIÇÃO] Novo Líder Aclamado: Nó {origem}")
 
         except Exception as e:
             print(f" [ERRO] Handler: {e}")
         finally:
-            client_sock.close()
+            cliente_sock.close()
 
     def atualizar_banco_local(self, lista_clientes):
         """ Apaga o banco local e reescreve com os dados recebidos """
@@ -223,18 +218,18 @@ class NodeMiddleware:
         for peer in self.peers:
             self.enviar_mensagem(peer, "WHO_IS_MASTER", {})
         
-        # 2. Aguarda respostas (handle_client vai atualizar self.coordinator_id se receber resposta)
+        # 2. Aguarda respostas (handle_cliente vai atualizar self.coordenador_id se receber resposta)
         time.sleep(3)
         
         # 3. Análise
-        if self.coordinator_id == self.id:
+        if self.coordenador_id == self.id:
             print(" [JOIN] Nenhuma resposta de Mestre. Assumindo Liderança Inicial.")
         else:
-            print(f" [JOIN] Encontrado Mestre no Nó {self.coordinator_id}.")
+            print(f" [JOIN] Encontrado Mestre no Nó {self.coordenador_id}.")
             print(" [JOIN] Solicitando Sincronização de Dados...")
             
             # 4. Pede os dados
-            self.enviar_mensagem(self.coordinator_id, "SYNC_REQ", {})
+            self.enviar_mensagem(self.coordenador_id, "SYNC_REQ", {})
             
             # 5. Aguarda os dados chegarem e serem processados
             print(" [JOIN] Aguardando transferência de dados...")
@@ -242,8 +237,8 @@ class NodeMiddleware:
             
             # 6. Check do Algoritmo Bully Pós-Sync
             # Se eu entrei, peguei os dados, mas meu ID é maior que o do chefe atual, eu o derrubo.
-            if int(self.id) > int(self.coordinator_id):
-                print(f" [BULLY] Meu ID ({self.id}) é maior que o do Mestre atual ({self.coordinator_id}).")
+            if int(self.id) > int(self.coordenador_id):
+                print(f" [BULLY] Meu ID ({self.id}) é maior que o do Mestre atual ({self.coordenador_id}).")
                 print(" [BULLY] Iniciando Eleição para tomar a liderança...")
                 self.start_election()
                 
@@ -259,15 +254,15 @@ class NodeMiddleware:
             time.sleep(5) 
             
             # Se eu sou o chefe, não me monitoro
-            if self.id == self.coordinator_id:
+            if self.id == self.coordenador_id:
                 continue
                 
             # Tenta pingar o chefe
-            # print(f" [MONITOR] Verificando Mestre {self.coordinator_id}...")
-            res = self.enviar_mensagem(self.coordinator_id, "HEARTBEAT", {})
+            # print(f" [MONITOR] Verificando Mestre {self.coordenador_id}...")
+            res = self.enviar_mensagem(self.coordenador_id, "HEARTBEAT", {})
             
             if res is None:
-                print(f" [ALERTA] Mestre {self.coordinator_id} não responde! Iniciando Eleição.")
+                print(f" [ALERTA] Mestre {self.coordenador_id} não responde! Iniciando Eleição.")
                 self.start_election()
 
     def start_election(self):
@@ -286,12 +281,12 @@ class NodeMiddleware:
         
         # 3. Se sou eu, aviso todo mundo. Se não, aceito.
         if novo_lider == self.id:
-            self.coordinator_id = self.id
+            self.coordenador_id = self.id
             print(f" [MASTER] Venci a eleição! Sou o novo Coordenador.")
             for peer in self.peers:
                 self.enviar_mensagem(peer, "COORDINATOR", {})
         else:
-            self.coordinator_id = novo_lider
+            self.coordenador_id = novo_lider
             print(f" [ELEIÇÃO] Reconheço {novo_lider} como novo Mestre.")
 
     # -------------------------------------------------------------------------

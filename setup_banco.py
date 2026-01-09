@@ -1,25 +1,21 @@
 import mysql.connector
 
-# --- CONFIGURAÇÕES ---
 
 def criar_banco():
     try:
-        # 1. Conecta no MySQL
-        conn = mysql.connector.connect(
+        connector = mysql.connector.connect(
             host="localhost",
             user="labsd",
             password= "labsd" 
         )
-        cursor = conn.cursor()
+        cursor = connector.cursor()
 
-        # 2. Executa os comandos SQL
-        print("Criando banco de dados...")
+        print("[INFO] Criando banco de dados")
         cursor.execute("CREATE DATABASE IF NOT EXISTS ddb;")
         
-        print("Selecionando o banco...")
         cursor.execute("USE ddb;")
 
-        print("Criando tabela 'clientes'...")
+        print("[INFO] Criando tabela 'clientes'")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clientes (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -28,20 +24,17 @@ def criar_banco():
             );
         """)
 
-        print("Inserindo dados de teste...")
-        cursor.execute("INSERT INTO clientes (nome, email) VALUES ('Rafael', 'rafael@gmail.com');")
         
-        conn.commit()
-        print("✅ Sucesso! Banco de dados criado e populado.")
+        connector.commit()
+        print("[INFO] Banco de dados criado.")
 
     except mysql.connector.Error as erro:
-        print(f"❌ Erro ao conectar no MySQL: {erro}")
-        print("Dica: Se der erro de 'Access denied', tente colocar 'root' ou 'mysql' como senha.")
+        print(f"[ERROR] Erro ao conectar no MySQL: {erro}")
     
     finally:
-        if 'conn' in locals() and conn.is_connected():
+        if 'conn' in locals() and connector.is_connected():
             cursor.close()
-            conn.close()
+            connector.close()
 
 if __name__ == "__main__":
     criar_banco()

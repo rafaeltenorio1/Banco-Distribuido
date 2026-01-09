@@ -24,7 +24,8 @@ class CupuacuClient(ctk.CTk):
         super().__init__()
 
         # Configuração da Janela Principal
-        self.title("Cupuaçu DB - Cliente Distribuído")
+        self.title("Banco de Dados Distribuído")
+
         self.geometry("700x650")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1) # A área de log expande
@@ -42,12 +43,12 @@ class CupuacuClient(ctk.CTk):
 
         # Inputs
         ctk.CTkLabel(self.frame_inputs, text="Nome Completo:", font=("Roboto", 12)).grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
-        self.entry_nome = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: Roberto Silva", height=35)
-        self.entry_nome.grid(row=0, column=1, padx=15, pady=(15, 5), sticky="ew")
+        self.nome = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: Roberto Silva", height=35)
+        self.nome.grid(row=0, column=1, padx=15, pady=(15, 5), sticky="ew")
 
         ctk.CTkLabel(self.frame_inputs, text="E-mail:", font=("Roboto", 12)).grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        self.entry_email = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: roberto@email.com", height=35)
-        self.entry_email.grid(row=1, column=1, padx=15, pady=5, sticky="ew")
+        self.email = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: roberto@email.com", height=35)
+        self.email.grid(row=1, column=1, padx=15, pady=5, sticky="ew")
 
         # Botões de Ação (Grid layout dentro do frame)
         self.btn_insert = ctk.CTkButton(self.frame_inputs, text="GRAVAR DADOS (INSERT)", 
@@ -136,8 +137,8 @@ class CupuacuClient(ctk.CTk):
             self.log_message(f"ERRO SQL: {response['error']}", "error")
 
     def fazer_insert(self):
-        nome = self.entry_nome.get()
-        email = self.entry_email.get()
+        nome = self.nome.get()
+        email = self.email.get()
         
         if not nome or not email:
             self.log_message("Validação: Preencha todos os campos!", "error")
@@ -147,8 +148,8 @@ class CupuacuClient(ctk.CTk):
         self.enviar_query(sql)
         
         # Limpa os campos na thread principal (necessário cuidado com threads, mas CTk aguenta)
-        self.entry_nome.delete(0, "end")
-        self.entry_email.delete(0, "end")
+        self.nome.delete(0, "end")
+        self.email.delete(0, "end")
 
     def fazer_select(self):
         self.enviar_query("SELECT * FROM clientes")
