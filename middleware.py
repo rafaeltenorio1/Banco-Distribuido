@@ -27,7 +27,7 @@ class NodeMiddleware:
         self.db = DBManager(NODES_CONFIG[node_id]["db_host"], DB_USER, DB_PASS, DB_NAME)
         
         # Estado do Nó
-        self.coordinator_id = max(NODES_CONFIG.keys()) # Inicialmente o maior ID é o líder (Bully simplificado)
+        self.coordinator_id = self.id # Assume a si mesmo provisoriamente até o join_cluster
         self.active_nodes = {}
         
     def calcular_checksum(self, payload):
@@ -139,11 +139,95 @@ class NodeMiddleware:
             elif tipo == "COORDINATOR":
                 self.coordinator_id = origem
                 print(f" [ELEIÇÃO] Novo coordenador definido: Nó {origem}")
+                
+            elif tipo == "WHO_IS_MASTER":
+                # Alguém entrou na rede e quer saber quem manda.
+                # Se EU sou o coordenador, eu respondo.
+                if self.id == self.coordinator_id:
+                    self.enviar_mensagem(origem, "COORDINATOR_ANNOUNCE", {})
+
+            elif tipo == "COORDINATOR_ANNOUNCE":
+                # Descobri quem é o chefe
+                self.coordinator_id = origem
+                print(f" [INFO] Coordenador encontrado: Nó {origem}")
+
+            elif tipo == "SYNC_REQ":
+                # Sou o Coordenador e alguém pediu os dados para se atualizar.
+                print(f" [SYNC] Nó {origem} pediu sincronização. Enviando dados...")
+                
+                # 1. Pega TUDO do banco
+                dados = self.db.executar_query("SELECT * FROM clientes")
+                
+                # 2. Envia de volta (Payload contém a lista de clientes)
+                self.enviar_mensagem(origem, "SYNC_DATA", {"clientes": dados['dados']})
+
+            elif tipo == "SYNC_DATA":
+                # Recebi os dados atualizados do chefe. Hora de atualizar meu banco.
+                print(f" [SYNC] Recebi carga de dados. Atualizando banco local...")
+                lista_clientes = payload['clientes']
+                self.atualizar_banco_local(lista_clientes)
 
         except Exception as e:
             print(f"Erro no handle: {e}")
         finally:
             client_sock.close()
+    
+    def atualizar_banco_local(self, lista_clientes):
+        # Atenção: Isso é uma estratégia de "Full Refresh" (ideal para TCC/tabelas pequenas)
+        # Em produção real, usaríamos logs de transação, mas aqui garante consistência total.
+        
+        try:
+            # 1. Limpa a tabela atual
+            self.db.executar_query("DELETE FROM clientes") # Ou TRUNCATE
+            
+            # 2. Reinsere um por um (ou poderia fazer um bulk insert)
+            for cliente in lista_clientes:
+                # cliente é um dicionário ou tupla, dependendo do conector. 
+                # Vamos assumir dicionário conforme seu db_manager.
+                nome = cliente['nome']
+                email = cliente['email']
+                sql = f"INSERT INTO clientes (nome, email) VALUES ('{nome}', '{email}')"
+                self.db.executar_query(sql)
+                
+            print(f" [SYNC] Sincronização concluída! {len(lista_clientes)} registros importados.")
+            
+        except Exception as e:
+            print(f" [ERRO] Falha ao sincronizar banco: {e}")
+
+    def join_cluster(self):
+        print(" [*] Iniciando protocolo de entrada no cluster...")
+        
+        # 1. Tenta descobrir quem é o coordenador atual
+        coordenador_encontrado = False
+        
+        # Pergunta para todos os peers "Quem é o mestre?"
+        for peer in self.peers:
+            self.enviar_mensagem(peer, "WHO_IS_MASTER", {})
+        
+        # Dá um tempo para as respostas chegarem (via handle_client)
+        print(" [*] Aguardando resposta do Coordenador...")
+        time.sleep(3) 
+        
+        # Verifica se alguém respondeu (meu coordinator_id mudou?)
+        # Nota: Inicialmente no __init__, defina self.coordinator_id = None ou self.id
+        
+        if self.coordinator_id != self.id:
+            print(f" [*] Entrando como ESCRAVO. Coordenador é {self.coordinator_id}")
+            # 2. Pede Sincronização
+            self.enviar_mensagem(self.coordinator_id, "SYNC_REQ", {})
+            # Espera a sincronização acontecer
+            time.sleep(2)
+        else:
+            print(" [*] Ninguém respondeu. Assumindo como COORDENADOR (ou sou o primeiro).")
+            self.coordinator_id = self.id
+            
+        # Pós-Sincronização: Se eu sou o ID maior (ex: Nó 3) e entrei depois,
+        # o Algoritmo Bully diz que eu devo convocar eleição agora.
+        # Mas agora faço isso DEPOIS de ter os dados.
+        if int(self.id) > int(self.coordinator_id):
+            print(" [BULLY] Percebi que meu ID é maior que o do Coordenador atual.")
+            self.start_election()
+            
 
     def monitor_cluster(self):
         """ Thread que verifica periodicamente se o Coordenador está vivo """
@@ -199,7 +283,7 @@ class NodeMiddleware:
         t_server = threading.Thread(target=self.start_server)
         t_server.start()
         
-        t_monitor = threading.Thread(target=self.monitor_cluster) 
+        t_monitor = threading.Thread(target=self.monitor_cluster)
         t_monitor.start()
         
         print("Middleware Iniciado. Aguardando comandos...")
