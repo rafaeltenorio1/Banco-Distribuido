@@ -54,7 +54,6 @@ def menu():
         print("\n=== CLIENTE DDB ===")
         print("1. Inserir Cliente (INSERT)")
         print("2. Listar Clientes (SELECT)")
-        print("3. Query Personalizada")
         print("0. Sair")
         opt = input("Opção: ")
         
@@ -64,10 +63,8 @@ def menu():
             sql = f"INSERT INTO clientes (nome, email) VALUES ('{nome}', '{email}')"
             enviar_query(sql)
         elif opt == '2':
-            enviar_query("SELECT * FROM clientes")
-        elif opt == '3':
-            sql = input("Digite a Query SQL: ")
-            enviar_query(sql)
+            # Função pra executar local
+            enviar_query("SELECT * FROM clientes") 
         elif opt == '0':
             break
 
