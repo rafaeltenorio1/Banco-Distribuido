@@ -4,9 +4,8 @@ import random
 
 # Configuração dos nós disponíveis para conexão
 NODES = [
-    {"ip": "localhost", "port": 5001},
-    {"ip": "localhost", "port": 5002},
-    {"ip": "localhost", "port": 5003}
+    {"ip": "192.168.15.6", "port": 5001},
+    {"ip": "192.168.15.48", "port": 5001}
 ]
 
 def calcular_checksum(payload):
@@ -35,7 +34,7 @@ def enviar_query(sql):
         # Aguarda resposta
         resp_raw = s.recv(4096).decode()
         response = json.loads(resp_raw)
-        
+        print(response) 
         print("-" * 50)
         print(f"Conectado ao Nó: {node['port']}")
         print(f"Executado no Nó: {response.get('node_exec')}")
