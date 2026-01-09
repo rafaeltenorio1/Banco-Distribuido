@@ -89,7 +89,7 @@ class NodeMiddleware:
             tipo = msg['tipo']
             payload = msg['payload']
             origem = msg['origem']
-
+            # PROTOCOLO DE COMUNICACAO
             # --- PROCESSAMENTO DAS MENSAGENS ---
             
             if tipo == "HEARTBEAT":

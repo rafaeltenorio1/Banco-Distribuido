@@ -1,0 +1,16 @@
+services:
+  database-1:
+    image: mysql:latest
+    container_name: db1-mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'ddb'   
+      MYSQL_USER: 'labsd'
+      MYSQL_PASSWORD: 'labsd'      
+      MYSQL_ROOT_PASSWORD: 'admin'
+    ports:
+      - '3307:3306'
+    expose:
+      - '3306'
+    volumes:
+      - './.mysql-data/db:/var/lib/mysql'
