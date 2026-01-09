@@ -13,7 +13,7 @@ class DBManager:
         connector = None
         try:
             connector = mysql.connector.connect(**self.config)
-            cursor = conn.cursor(dictionary=True)
+            cursor = connector.cursor(dictionary=True)
             
             # Se for SELECT
             if sql.strip().upper().startswith("SELECT"):
@@ -24,7 +24,7 @@ class DBManager:
             # Se for INSERT/UPDATE/DELETE
             else:
                 cursor.execute(sql)
-                conn.commit()
+                connector.commit()
                 return {"status": "OK", "mensagem": "Operação realizada com sucesso"}
                 
         except mysql.connector.Error as err:
@@ -32,4 +32,4 @@ class DBManager:
         finally:
             if connector and connector.is_connected():
                 cursor.close()
-                conn.close()
+                connector.close()

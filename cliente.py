@@ -6,13 +6,12 @@ import threading
 import customtkinter as ctk
 from datetime import datetime
 
-# --- CONFIGURAÇÕES DO SISTEMA ---
-ctk.set_appearance_mode("Dark")  # Modo escuro (Alto Contraste)
-ctk.set_default_color_theme("dark-blue")  # Tema de cores azul/ciano
+ctk.set_appearance_mode("Dark")  
+ctk.set_default_color_theme("dark-blue") 
 
 NODES = [
-    {"ip": "192.168.15.6", "port": 5001},
-    {"ip": "192.168.15.48", "port": 5001}
+    {"ip": "192.168.15.6", "porta": 5001},
+    {"ip": "192.168.15.48", "porta": 5001}
 ]
 
 def calcular_checksum(payload):
@@ -28,15 +27,15 @@ class CupuacuClient(ctk.CTk):
 
         self.geometry("700x650")
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1) # A área de log expande
+        self.grid_rowconfigure(2, weight=1) 
 
-        # --- CABEÇALHO ---
+        # Cabeçalho
         self.lbl_title = ctk.CTkLabel(self, text="DASHBOARD DO CLIENTE", 
                                       font=("Roboto Medium", 20),
                                       text_color="#4CB5F5") # Azul claro para contraste
         self.lbl_title.grid(row=0, column=0, pady=(20, 10), sticky="ew")
 
-        # --- FRAME DE INSERÇÃO (CARD) ---
+        # Inserção de dados
         self.frame_inputs = ctk.CTkFrame(self, corner_radius=15)
         self.frame_inputs.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
         self.frame_inputs.grid_columnconfigure(1, weight=1)
@@ -50,35 +49,35 @@ class CupuacuClient(ctk.CTk):
         self.email = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: roberto@email.com", height=35)
         self.email.grid(row=1, column=1, padx=15, pady=5, sticky="ew")
 
-        # Botões de Ação (Grid layout dentro do frame)
+        # Botões de ação 
         self.btn_insert = ctk.CTkButton(self.frame_inputs, text="GRAVAR DADOS (INSERT)", 
-                                        fg_color="#2CC985", hover_color="#229A65", # Verde vibrante
+                                        fg_color="#2CC985", hover_color="#229A65",
                                         height=40, font=("Roboto", 12, "bold"),
                                         command=lambda: self.run_async(self.fazer_insert))
         self.btn_insert.grid(row=2, column=0, columnspan=2, padx=15, pady=(15, 10), sticky="ew")
 
         self.btn_select = ctk.CTkButton(self.frame_inputs, text="CONSULTAR BANCO (SELECT)", 
-                                        fg_color="#3B8ED0", hover_color="#1F6AA5", # Azul padrão
+                                        fg_color="#3B8ED0", hover_color="#1F6AA5", 
                                         height=40, font=("Roboto", 12, "bold"),
                                         command=lambda: self.run_async(self.fazer_select))
         self.btn_select.grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
 
-        # --- ÁREA DE LOG (TERMINAL) ---
+        # Terminal
         self.lbl_log = ctk.CTkLabel(self, text="Terminal de Respostas", anchor="w", text_color="gray")
         self.lbl_log.grid(row=2, column=0, padx=25, pady=(10,0), sticky="w")
 
         self.txt_log = ctk.CTkTextbox(self, font=("Consolas", 13), activate_scrollbars=True)
         self.txt_log.grid(row=3, column=0, padx=20, pady=(5, 20), sticky="nsew")
-        self.txt_log.configure(state="disabled") # Somente leitura
+        self.txt_log.configure(state="disabled") 
 
-        # Tags de cor manual (Workaround para CTkTextbox)
+        # Tags de cor manual 
         self.log_message("Sistema iniciado. Pronto para conexão.", "info")
 
     def log_message(self, message, type="info"):
-        """Escreve no log com cores baseadas no tipo"""
+        
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Definição de cores (Simulação visual via texto formatado)
+        # Definição de cores 
         prefix = f"[{timestamp}] "
         full_msg = f"{prefix} {message}\n"
         
@@ -88,7 +87,6 @@ class CupuacuClient(ctk.CTk):
         self.txt_log.see("end")
 
     def run_async(self, func):
-        """Executa funções de rede em uma thread separada para não travar a GUI"""
         threading.Thread(target=func, daemon=True).start()
 
     def enviar_query(self, sql):
@@ -98,56 +96,56 @@ class CupuacuClient(ctk.CTk):
 
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(3) # Timeout rápido
-                s.connect((node['ip'], node['port']))
+                s.settimeout(3) 
+                s.connect((node['ip'], node['porta']))
             
                 payload = {"sql": sql}
-                msg = {
+                mensagem = {
                     "tipo": "QUERY_REQ",
                     "origem": "GUI_CLIENT",
                     "payload": payload,
                     "checksum": calcular_checksum(payload)
                 }
             
-                s.send(json.dumps(msg).encode())
+                s.send(json.dumps(mensagem).encode())
                 resp_raw = s.recv(4096).decode()
                 s.close()
 
-                response = json.loads(resp_raw)
-                self.processar_resposta(response, node['port'])
+                resposta = json.loads(resp_raw)
+                self.processar_resposta(resposta, node['porta'])
                 break
             except Exception as e:
-                self.log_message(f"FALHA: Não foi possível conectar ao nó {node['port']}", "error")
+                self.log_message(f"FALHA: Não foi possível conectar ao nó {node['porta']}", "error")
                 self.log_message(f"Sorteando cliente para conectar novamente", "error")
 
-    def processar_resposta(self, response, port):
-        status = response.get('result', {}).get('status')
-        node_exec = response.get('node_exec')
+    def processar_resposta(self, resposta, porta):
+        status = resposta.get('resultado', {}).get('status')
+        node_exec = resposta.get('node_exec')
         
-        msg_header = f"RESPOSTA RECEBIDA (Nó {node_exec}): Status [{status}]"
+        msg_header = f"[INFO] RESPOSTA RECEBIDA (Nó {node_exec}): Status [{status}]"
         self.log_message(msg_header)
 
-        if 'dados' in response.get('result', {}):
-            self.log_message("--- DADOS ---")
-            for linha in response['result']['dados']:
+        if 'dados' in resposta.get('resultado', {}):
+            self.log_message("----------- DADOS -----------")
+            for linha in resposta['resultado']['dados']:
                 self.log_message(f" > {linha}")
-            self.log_message("-------------")
+            self.log_message("-------------------------")
         
-        if response.get('error'):
-            self.log_message(f"ERRO SQL: {response['error']}", "error")
+        if resposta.get('error'):
+            self.log_message(f"[ERRO] SQL: {resposta['error']}", "error")
 
     def fazer_insert(self):
         nome = self.nome.get()
         email = self.email.get()
         
         if not nome or not email:
-            self.log_message("Validação: Preencha todos os campos!", "error")
+            self.log_message("Preencha todos os campos!", "error")
             return
 
         sql = f"INSERT INTO clientes (nome, email) VALUES ('{nome}', '{email}')"
         self.enviar_query(sql)
         
-        # Limpa os campos na thread principal (necessário cuidado com threads, mas CTk aguenta)
+        # Limpa os campos na thread principal
         self.nome.delete(0, "end")
         self.email.delete(0, "end")
 
