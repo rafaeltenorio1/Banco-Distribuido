@@ -91,32 +91,33 @@ class CupuacuClient(ctk.CTk):
         threading.Thread(target=func, daemon=True).start()
 
     def enviar_query(self, sql):
-        node = random.choice(NODES)
-        self.log_message(f"Conectando a {node['ip']}...", "info")
+        while True:
+            node = random.choice(NODES)
+            self.log_message(f"Conectando a {node['ip']}...", "info")
 
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3) # Timeout rápido
-            s.connect((node['ip'], node['port']))
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3) # Timeout rápido
+                s.connect((node['ip'], node['port']))
             
-            payload = {"sql": sql}
-            msg = {
-                "tipo": "QUERY_REQ",
-                "origem": "GUI_CLIENT",
-                "payload": payload,
-                "checksum": calcular_checksum(payload)
-            }
+                payload = {"sql": sql}
+                msg = {
+                    "tipo": "QUERY_REQ",
+                    "origem": "GUI_CLIENT",
+                    "payload": payload,
+                    "checksum": calcular_checksum(payload)
+                }
             
-            s.send(json.dumps(msg).encode())
-            resp_raw = s.recv(4096).decode()
-            s.close()
+                s.send(json.dumps(msg).encode())
+                resp_raw = s.recv(4096).decode()
+                s.close()
 
-            response = json.loads(resp_raw)
-            self.processar_resposta(response, node['port'])
-
-        except Exception as e:
-            self.log_message(f"FALHA: Não foi possível conectar ao nó {node['port']}", "error")
-            self.log_message(f"Erro técnico: {str(e)}", "error")
+                response = json.loads(resp_raw)
+                self.processar_resposta(response, node['port'])
+                break
+            except Exception as e:
+                self.log_message(f"FALHA: Não foi possível conectar ao nó {node['port']}", "error")
+                self.log_message(f"Sorteando cliente para conectar novamente", "error")
 
     def processar_resposta(self, response, port):
         status = response.get('result', {}).get('status')
