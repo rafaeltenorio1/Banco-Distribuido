@@ -9,11 +9,10 @@ from db_manager import DBManager
 # --- CONFIGURAÇÃO (Em um cenário real, isso viria de um arquivo config.json) ---
 # Se for rodar em maquinas reais, troque 'localhost' pelos IPs reais e use a mesma porta
 NODES_CONFIG = {
-    "1": {"ip": "localhost", "port": 5001, "db_host": "localhost"},
-    "2": {"ip": "localhost", "port": 5002, "db_host": "localhost"},
-    "3": {"ip": "localhost", "port": 5003, "db_host": "localhost"}
+    "1": {"ip": "192.168.15.48", "port": 5001, "db_host": "localhost"},
+    "2": {"ip": "192.168.15.6", "port": 5001, "db_host": "localhost"}
 }
-DB_USER = "root"       # <--- COLOQUE SEU USUARIO DO MYSQL
+DB_USER = "labsd"       # <--- COLOQUE SEU USUARIO DO MYSQL
 DB_PASS = "labsd"      # <--- COLOQUE SUA SENHA DO MYSQL
 DB_NAME = "ddb"
 
@@ -89,7 +88,7 @@ class NodeMiddleware:
             tipo = msg['tipo']
             payload = msg['payload']
             origem = msg['origem']
-
+            # PROTOCOLO DE COMUNICACAO
             # --- PROCESSAMENTO DAS MENSAGENS ---
             
             if tipo == "HEARTBEAT":
