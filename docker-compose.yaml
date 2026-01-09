@@ -1,7 +1,7 @@
 services:
-  database:
+  database-1:
     image: mysql:latest
-    container_name: mysql
+    container_name: db1-mysql
     restart: always
     environment:
       MYSQL_DATABASE: 'ddb'   
