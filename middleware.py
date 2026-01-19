@@ -8,12 +8,13 @@ from db_manager import DBManager
 
 # Configuração dos hosts
 NODES_CONFIG = {
-    "1": {"ip": "192.168.15.48", "porta": 5001, "db_host": "localhost"},
-    "2": {"ip": "192.168.15.6", "porta": 5001, "db_host": "localhost"}
-}
+    "1": {"ip": "172.20.10.12", "porta": 5001, "db_host": "localhost"},
+    "2": {"ip": "172.20.10.9", "porta": 5001, "db_host": "localhost"}
+    "3": {"ip": "192.0.0.2", "porta": 5001, "db_host": "localhost"}
+    }
 
-DB_USER = "labsd"    
-DB_PASS = "labsd"  
+DB_USER = "labsd"
+DB_PASS = "labsd"
 DB_NAME = "ddb"
 
 class NodeMiddleware:

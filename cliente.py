@@ -10,8 +10,9 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue") 
 
 NODES = [
-    {"ip": "192.168.15.6", "porta": 5001},
-    {"ip": "192.168.15.48", "porta": 5001}
+    {"ip": "172.20.10.12", "porta": 5001},
+    {"ip": "172.20.10.9", "porta": 5001},
+    {"ip": "192.0.0.2", "porta": 5001}
 ]
 
 def calcular_checksum(payload):
