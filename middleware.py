@@ -8,9 +8,9 @@ from db_manager import DBManager
 
 # Configuração dos hosts
 NODES_CONFIG = {
-    "1": {"ip": "10.243.212.8", "porta": 5001, "db_host": "localhost"},
-    "2": {"ip": "10.243.212.56", "porta": 5001, "db_host": "localhost"},
-    # "3": {"ip": "10.243.212.252", "porta": 5001, "db_host": "localhost"}
+    "1": {"ip": "10.159.0.56", "porta": 5001, "db_host": "localhost"},
+    # "2": {"ip": "10.159.0.101", "porta": 5001, "db_host": "localhost"},
+    # "3": {"ip": "10.159.0.252", "porta": 5001, "db_host": "localhost"},
     }
 
 DB_USER = "labsd"
@@ -108,35 +108,48 @@ class NodeMiddleware:
                 self.active_nodes[origem] = time.time()
 
             elif tipo == "QUERY_REQ":
-                print(f" [INFO] Query recebida de {origem}: {payload['sql']}")
                 sql = payload['sql']
-                
-                # Caso a query seja de SELECT
-                if sql.strip().upper().startswith("SELECT"):
+                if self.id == self.coordenador_id:
+                    print(" [INFO] Executando query e replicando")
                     resultado = self.db.executar_query(sql)
-                    resposta = {"node_exec": self.id, "resultado": resultado}
+
+                    # Realizando o broadcast para replicação
+                    for par in self.pares:
+                        threading.Thread(target=self.enviar_mensagem, 
+                                       args=(par, "REPLICACAO", {"sql": sql})).start()
+
+                    resposta = {"node_exec": f"{self.id}", "resultado": resultado}
                     cliente_socket.send(json.dumps(resposta).encode())
-                
-                # Caso a query seja de INSERT/UPDATE/DELETE
-                else:
-                    # Caso seja o coordenador executa a query e replica para os demais
-                    if self.id == self.coordenador_id:
-                        print(" [INFO] Executando query e replicando")
-                        resultado = self.db.executar_query(sql)
-                        
-                        # Realizando o broadcast para replicação
-                        for par in self.pares:
-                            threading.Thread(target=self.enviar_mensagem, 
-                                           args=(par, "REPLICACAO", {"sql": sql})).start()
-                        
-                        resposta = {"node_exec": f"{self.id}", "resultado": resultado}
-                        cliente_socket.send(json.dumps(resposta).encode())
-                    
+
+                # print(f" [INFO] Query recebida de {origem}: {payload['sql']}")
+                # sql = payload['sql']
+                #
+                # # Caso a query seja de SELECT
+                # if sql.strip().upper().startswith("SELECT"):
+                #     resultado = self.db.executar_query(sql)
+                #     resposta = {"node_exec": self.id, "resultado": resultado}
+                #     cliente_socket.send(json.dumps(resposta).encode())
+                #
+                # # Caso a query seja de INSERT/UPDATE/DELETE
+                # else:
+                #     # Caso seja o coordenador executa a query e replica para os demais
+                #     if self.id == self.coordenador_id:
+                #         print(" [INFO] Executando query e replicando")
+                #         resultado = self.db.executar_query(sql)
+                #
+                #         # Realizando o broadcast para replicação
+                #         for par in self.pares:
+                #             threading.Thread(target=self.enviar_mensagem, 
+                #                            args=(par, "REPLICACAO", {"sql": sql})).start()
+                #
+                #         resposta = {"node_exec": f"{self.id}", "resultado": resultado}
+                #         cliente_socket.send(json.dumps(resposta).encode())
+                #
                     # Caso não seja o coordenador, redireciona a query para o coordenador
-                    else:
-                        print(f" [INFO] Redirecionando a query para o coordenador {self.coordenador_id}")
-                        resposta = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload)
-                        cliente_socket.send(json.dumps(resposta).encode())
+                else:
+                    print(f" [INFO] Redirecionando a query para o coordenador {self.coordenador_id}")
+                    resposta = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload)
+                    cliente_socket.send(json.dumps(resposta).encode())
 
             elif tipo == "REPLICACAO":
                 print(f" [REPLICACAO] Gravando no banco local: {payload['sql']}")

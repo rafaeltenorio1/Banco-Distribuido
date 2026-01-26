@@ -11,8 +11,8 @@ ctk.set_default_color_theme("dark-blue")
 
 NODES = [
     {"ip": "10.159.0.56", "porta": 5001},
-    {"ip": "10.159.0.101", "porta": 5001},
-    {"ip": "10.159.0.252", "porta": 5001}
+    # {"ip": "10.159.0.101", "porta": 5001},
+    # {"ip": "10.159.0.252", "porta": 5001}
 ]
 
 def calcular_checksum(payload):
@@ -42,26 +42,16 @@ class CupuacuClient(ctk.CTk):
         self.frame_inputs.grid_columnconfigure(1, weight=1)
 
         # Inputs
-        ctk.CTkLabel(self.frame_inputs, text="Nome Completo:", font=("Roboto", 12)).grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
-        self.nome = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: Roberto Silva", height=35)
-        self.nome.grid(row=0, column=1, padx=15, pady=(15, 5), sticky="ew")
-
         ctk.CTkLabel(self.frame_inputs, text="E-mail:", font=("Roboto", 12)).grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        self.email = ctk.CTkEntry(self.frame_inputs, placeholder_text="Ex: roberto@email.com", height=35)
+        self.email = ctk.CTkEntry(self.frame_inputs, placeholder_text="SELECT * FROM clientes;", height=35)
         self.email.grid(row=1, column=1, padx=15, pady=5, sticky="ew")
 
         # Botões de ação 
-        self.btn_insert = ctk.CTkButton(self.frame_inputs, text="GRAVAR DADOS (INSERT)", 
+        self.btn_insert = ctk.CTkButton(self.frame_inputs, text="ENVIAR QUERY", 
                                         fg_color="#2CC985", hover_color="#229A65",
                                         height=40, font=("Roboto", 12, "bold"),
                                         command=lambda: self.run_async(self.fazer_insert))
         self.btn_insert.grid(row=2, column=0, columnspan=2, padx=15, pady=(15, 10), sticky="ew")
-
-        self.btn_select = ctk.CTkButton(self.frame_inputs, text="CONSULTAR BANCO (SELECT)", 
-                                        fg_color="#3B8ED0", hover_color="#1F6AA5", 
-                                        height=40, font=("Roboto", 12, "bold"),
-                                        command=lambda: self.run_async(self.fazer_select))
-        self.btn_select.grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
 
         # Terminal
         self.lbl_log = ctk.CTkLabel(self, text="Terminal de Respostas", anchor="w", text_color="gray")
@@ -136,18 +126,17 @@ class CupuacuClient(ctk.CTk):
             self.log_message(f"[ERRO] SQL: {resposta['error']}", "error")
 
     def fazer_insert(self):
-        nome = self.nome.get()
+        # nome = self.nome.get()
         email = self.email.get()
         
-        if not nome or not email:
+        if not email:
             self.log_message("Preencha todos os campos!", "error")
             return
 
-        sql = f"INSERT INTO clientes (nome, email) VALUES ('{nome}', '{email}')"
+        sql = email 
         self.enviar_query(sql)
         
         # Limpa os campos na thread principal
-        self.nome.delete(0, "end")
         self.email.delete(0, "end")
 
     def fazer_select(self):
