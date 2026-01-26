@@ -10,9 +10,9 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue") 
 
 NODES = [
-    {"ip": "10.243.212.8", "porta": 5001},
-    {"ip": "10.243.212.56", "porta": 5001},
-    {"ip": "10.243.212.252", "porta": 5001}
+    {"ip": "10.159.0.56", "porta": 5001},
+    {"ip": "10.159.0.101", "porta": 5001},
+    {"ip": "10.159.0.252", "porta": 5001}
 ]
 
 def calcular_checksum(payload):
@@ -122,7 +122,7 @@ class CupuacuClient(ctk.CTk):
     def processar_resposta(self, resposta, porta):
         status = resposta.get('resultado', {}).get('status')
         node_exec = resposta.get('node_exec')
-        
+        print(status) 
         msg_header = f"[INFO] RESPOSTA RECEBIDA (Nó {node_exec}): Status [{status}]"
         self.log_message(msg_header)
 

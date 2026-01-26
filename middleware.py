@@ -10,7 +10,7 @@ from db_manager import DBManager
 NODES_CONFIG = {
     "1": {"ip": "10.243.212.8", "porta": 5001, "db_host": "localhost"},
     "2": {"ip": "10.243.212.56", "porta": 5001, "db_host": "localhost"},
-    "3": {"ip": "10.243.212.252", "porta": 5001, "db_host": "localhost"}
+    # "3": {"ip": "10.243.212.252", "porta": 5001, "db_host": "localhost"}
     }
 
 DB_USER = "labsd"
