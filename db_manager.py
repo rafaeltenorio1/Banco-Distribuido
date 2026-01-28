@@ -13,19 +13,18 @@ class DBManager:
         connector = None
         try:
             connector = mysql.connector.connect(**self.config)
-            cursor = connector.cursor(dictionary=True)
+            cursor = connector.cursor(dictionary=True, buffered=True)
             
             # Se for SELECT
             if sql.strip().upper().startswith("SELECT"):
                 cursor.execute(sql)
                 resultado = cursor.fetchall()
-                return {"status": "OK", "dados": resultado}
+                returnresultado
             
-            # Se for INSERT/UPDATE/DELETE
             else:
                 cursor.execute(sql)
                 connector.commit()
-                return {"status": "OK", "mensagem": "Operação realizada com sucesso"}
+                return "OK"
                 
         except mysql.connector.Error as err:
             return {"status": "ERRO", "mensagem": str(err)}

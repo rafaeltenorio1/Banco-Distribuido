@@ -8,7 +8,7 @@ from db_manager import DBManager
 
 # Configuração dos hosts
 NODES_CONFIG = {
-    "1": {"ip": "10.159.0.56", "porta": 5001, "db_host": "localhost"},
+    "1": {"ip": "localhost", "porta": 5001, "db_host": "localhost"},
     # "2": {"ip": "10.159.0.101", "porta": 5001, "db_host": "localhost"},
     # "3": {"ip": "10.159.0.252", "porta": 5001, "db_host": "localhost"},
     }
@@ -35,30 +35,26 @@ class NodeMiddleware:
         
     def calcular_checksum(self, payload):
         # Função para verificar a carga com checksum
-        dump = json.dumps(payload, sort_keys=True).encode()
-        return hashlib.md5(dump).hexdigest()
+        return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
-    def enviar_mensagem(self, target_node_id, tipo, payload):
+    def enviar_mensagem(self, target_node_id, tipo, sql):
         # Função para enviar uma mensagem para outro nó
         target = NODES_CONFIG[target_node_id]
+        checksum = self.calcular_checksum(sql)
         try:
+            
             cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             cliente.settimeout(2) # Timeout curto para não travar o sistema
             cliente.connect((target['ip'], target['porta']))
-            
-            mensagem = {
-                "tipo": tipo,
-                "origem": self.id,
-                "payload": payload,
-                "checksum": self.calcular_checksum(payload)
-            }
-            cliente.send(json.dumps(mensagem).encode())
+             
+            mensagem = f"{tipo}\x1f{sql}\x1f{checksum}"
+            cliente.send(mensagem.encode("utf-8"))
             
             # Caso seja uma query o cliente espera a resposta
             if tipo == "QUERY_REQ":
                 resp_raw = cliente.recv(409600).decode()
                 cliente.close()
-                return json.loads(resp_raw)
+                return resp_raw
                 
             cliente.close()
             return True 
@@ -86,108 +82,86 @@ class NodeMiddleware:
 
     def comunica_cliente(self, cliente_socket):
         try:
-            
             data = cliente_socket.recv(409600).decode() 
             if not data: 
                 return 
-            mensagem = json.loads(data)
-            
+            mensagem = data.split("\x1f")
+            tipo_mensagem = mensagem[0]
+            sql_mensagem = mensagem[1]
+            checksum_mensagem = mensagem[2]
+            print(tipo_mensagem, sql_mensagem, checksum_mensagem)
+            print(self.calcular_checksum(sql_mensagem))
             # Valida a integridade da mensagem através do checksum, caso esteja incorreto, descarta a mensagem
-            if mensagem['checksum'] != self.calcular_checksum(mensagem['payload']):
+            if checksum_mensagem != self.calcular_checksum(sql_mensagem):
                 print(" [ERRO] Checksum inválido. Mensagem descartada")
                 return
-
-            tipo = mensagem['tipo']
-            payload = mensagem['payload']
-            origem = mensagem['origem']
-
-            # Inicio do protocolo de comunicação
-
             
-            if tipo == "HEARTBEAT":
+            if tipo_mensagem == "HEARTBEAT":
                 self.active_nodes[origem] = time.time()
 
-            elif tipo == "QUERY_REQ":
-                sql = payload['sql']
+            elif tipo_mensagem == "QUERY_REQ":
                 if self.id == self.coordenador_id:
                     print(" [INFO] Executando query e replicando")
-                    resultado = self.db.executar_query(sql)
+                    resultado = self.db.executar_query(sql_mensagem)
 
                     # Realizando o broadcast para replicação
-                    for par in self.pares:
-                        threading.Thread(target=self.enviar_mensagem, 
-                                       args=(par, "REPLICACAO", {"sql": sql})).start()
+                    if any(cmd in sql_mensagem.upper() for cmd in ["INSERT", "UPDATE", "DELETE"]):
+                        print(" [INFO] Replicando alteração para os pares...")
+                        for par in self.pares:
+                            threading.Thread(target=self.enviar_mensagem, 
+                                           args=(par, "REPLICACAO", sql_mensagem)).start()                   
 
-                    resposta = {"node_exec": f"{self.id}", "resultado": resultado}
-                    cliente_socket.send(json.dumps(resposta).encode())
+                    checksum_resposta = self.calcular_checksum(resultado)
+                    resposta = f"{self.id}\x1f{resultado}\x1f{checksum_resposta}"
+                    print(resposta)
+                    cliente_socket.send(resposta.encode("utf-8"))
 
-                # print(f" [INFO] Query recebida de {origem}: {payload['sql']}")
-                # sql = payload['sql']
-                #
-                # # Caso a query seja de SELECT
-                # if sql.strip().upper().startswith("SELECT"):
-                #     resultado = self.db.executar_query(sql)
-                #     resposta = {"node_exec": self.id, "resultado": resultado}
-                #     cliente_socket.send(json.dumps(resposta).encode())
-                #
-                # # Caso a query seja de INSERT/UPDATE/DELETE
-                # else:
-                #     # Caso seja o coordenador executa a query e replica para os demais
-                #     if self.id == self.coordenador_id:
-                #         print(" [INFO] Executando query e replicando")
-                #         resultado = self.db.executar_query(sql)
-                #
-                #         # Realizando o broadcast para replicação
-                #         for par in self.pares:
-                #             threading.Thread(target=self.enviar_mensagem, 
-                #                            args=(par, "REPLICACAO", {"sql": sql})).start()
-                #
-                #         resposta = {"node_exec": f"{self.id}", "resultado": resultado}
-                #         cliente_socket.send(json.dumps(resposta).encode())
-                #
-                    # Caso não seja o coordenador, redireciona a query para o coordenador
                 else:
+
                     print(f" [INFO] Redirecionando a query para o coordenador {self.coordenador_id}")
                     resposta = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload)
-                    cliente_socket.send(json.dumps(resposta).encode())
+                    cliente_socket.send(resposta.encode("utf-8"))
 
-            elif tipo == "REPLICACAO":
+            elif tipo_mensagem == "REPLICACAO":
                 print(f" [REPLICACAO] Gravando no banco local: {payload['sql']}")
-                self.db.executar_query(payload['sql'])
+                self.db.executar_query(sql_mensagem)
             
             # Realização da sincronização e identificacão do coordenador
-            elif tipo == "PROCURAR_COORDENADOR":
+            elif tipo_mensagem == "PROCURAR_COORDENADOR":
                 # Caso seja o coordenador, responde o nó solicitante.
                 if self.id == self.coordenador_id:
                     print(f" [INFO] Nó {origem} procurando o coordenandor. Respondendo")
                     # Responde direto pra quem perguntou
-                    self.enviar_mensagem(origem, "ANUNCIA_COORDENADOR", {})
+                    self.enviar_mensagem(origem, "ANUNCIA_COORDENADOR", "")
 
-            elif tipo == "ANUNCIA_COORDENADOR":
+            elif tipo_mensagem == "ANUNCIA_COORDENADOR":
                 self.coordenador_id = origem
                 print(f" [INFO] Coordenador confirmado: {origem}")
 
-            elif tipo == "SYNC_REQ":
+            elif tipo_mensagem == "SYNC_REQ":
                 print(f" [SYNC] Nó {origem} solicitou sincronização.")
-                dados_banco = self.db.executar_query("SELECT * FROM clientes")
-                lista = dados_banco.get('dados', [])
-                
-                # Envia a resposta com os dados para a sincronização
-                self.enviar_mensagem(origem, "SYNC_DATA", {"clientes": lista})
-                print(f" [SYNC] {len(lista)} registros enviados para {origem}.")
+                # implementar sync req
 
-            elif tipo == "SYNC_DATA":
+                # dados_banco = self.db.executar_query("SELECT * FROM clientes")
+                # lista = dados_banco.get('dados', [])
+                #
+                # # Envia a resposta com os dados para a sincronização
+                # self.enviar_mensagem(origem, "SYNC_DATA", {"clientes": lista})
+                # print(f" [SYNC] {len(lista)} registros enviados para {origem}.")
+
+            elif tipo_mensagem == "SYNC_DATA":
                 print(" [SYNC] Recebendo dados.")
-                lista_clientes = payload['clientes']
-                self.atualizar_banco_local(lista_clientes)
+                # implementar sync_data
+                # lista_clientes = payload['clientes']
+                # self.atualizar_banco_local(lista_clientes)
             
-            elif tipo == "ELEICAO":
+            elif tipo_mensagem == "ELEICAO":
                 # O ID maior responde VIVO e inicia a eleição para se tornar coordenador
                 if int(self.id) > int(origem):
                     self.enviar_mensagem(origem, "VIVO", {})
                     self.iniciar_eleicao()
             
-            elif tipo == "COORDENADOR":
+            elif tipo_mensagem == "COORDENADOR":
                 self.coordenador_id = origem
                 print(f" [INFO] Novo coordenador escolhido: Nó {origem}")
 
