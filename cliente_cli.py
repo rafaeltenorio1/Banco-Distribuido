@@ -1,16 +1,18 @@
 import socket
 import hashlib
-import json
+import ast
 import random
 
 # Configuração: Mesmos nós que o Middleware conhece
 NODES = [
     {"ip": "localhost", "porta": 5001},
-    # Adicione outros IPs de nós aqui se houver
+    {"ip": "localhost", "porta": 5002},
+    {"ip": "localhost", "porta": 5003},
 ]
 
 def calcular_checksum(payload):
-    """Gera o MD5 da string (no middleware você usa a string da query)"""
+    
+    #Gera o MD5 da string (no middleware você usa a string da query)
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 def enviar_query_cli():
@@ -38,8 +40,7 @@ def enviar_query_cli():
             # Protocolo do Middleware: TIPO \x1f SQL \x1f CHECKSUM
             tipo = "QUERY_REQ"
             checksum = calcular_checksum(sql)
-            mensagem = f"{tipo}\x1f{sql}\x1f{checksum}"
-            print(sql, checksum)
+            mensagem = f"{tipo}\x1f{sql}\x1f{checksum}\x1fCLI"
             client.send(mensagem.encode("utf-8"))
 
             # Receber resposta
@@ -55,9 +56,17 @@ def enviar_query_cli():
                     print(f"\n[Resposta do Nó {node_id}]")
                     # Tenta formatar o JSON se vier como lista/dict
                     try:
-                        dados = json.loads(resultado.replace("'", '"')) # Fix simples para aspas
-                        print(json.dumps(dados, indent=4))
+                        # Tenta converter a string Python de volta para Lista/Dict
+                        dados = ast.literal_eval(resultado)
+                        
+                        # Imprime bonito
+                        if isinstance(dados, list):
+                            for linha in dados:
+                                print(linha)
+                        else:
+                            print(dados)
                     except:
+                            # Se não der pra converter, imprime o texto puro
                         print(resultado)
                 else:
                     print(f"Resposta malformada: {resp_raw}")

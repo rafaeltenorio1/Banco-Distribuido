@@ -19,7 +19,7 @@ class DBManager:
             if sql.strip().upper().startswith("SELECT"):
                 cursor.execute(sql)
                 resultado = cursor.fetchall()
-                returnresultado
+                return resultado
             
             else:
                 cursor.execute(sql)

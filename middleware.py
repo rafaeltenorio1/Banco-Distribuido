@@ -9,8 +9,8 @@ from db_manager import DBManager
 # Configuração dos hosts
 NODES_CONFIG = {
     "1": {"ip": "localhost", "porta": 5001, "db_host": "localhost"},
-    # "2": {"ip": "10.159.0.101", "porta": 5001, "db_host": "localhost"},
-    # "3": {"ip": "10.159.0.252", "porta": 5001, "db_host": "localhost"},
+    "2": {"ip": "localhost", "porta": 5001, "db_host": "localhost"},
+    "3": {"ip": "localhost", "porta": 5001, "db_host": "localhost"},
     }
 
 DB_USER = "labsd"
@@ -89,6 +89,7 @@ class NodeMiddleware:
             tipo_mensagem = mensagem[0]
             sql_mensagem = mensagem[1]
             checksum_mensagem = mensagem[2]
+            origem = mensagem[3]
             print(tipo_mensagem, sql_mensagem, checksum_mensagem)
             print(self.calcular_checksum(sql_mensagem))
             # Valida a integridade da mensagem através do checksum, caso esteja incorreto, descarta a mensagem
@@ -100,27 +101,43 @@ class NodeMiddleware:
                 self.active_nodes[origem] = time.time()
 
             elif tipo_mensagem == "QUERY_REQ":
-                if self.id == self.coordenador_id:
-                    print(" [INFO] Executando query e replicando")
+                
+                # Se for SELECT
+                if sql_mensagem.strip().upper().startswith("SELECT"):
+                    print(f" [SELECT] Recebido de {origem}")
                     resultado = self.db.executar_query(sql_mensagem)
-
-                    # Realizando o broadcast para replicação
-                    if any(cmd in sql_mensagem.upper() for cmd in ["INSERT", "UPDATE", "DELETE"]):
-                        print(" [INFO] Replicando alteração para os pares...")
-                        for par in self.pares:
-                            threading.Thread(target=self.enviar_mensagem, 
-                                           args=(par, "REPLICACAO", sql_mensagem)).start()                   
-
-                    checksum_resposta = self.calcular_checksum(resultado)
-                    resposta = f"{self.id}\x1f{resultado}\x1f{checksum_resposta}"
-                    print(resposta)
+                    
+                    resultado_str = str(resultado)
+                    
+                    checksum_resposta = self.calcular_checksum(resultado_str)
+                    
+                    resposta = f"{self.id}\x1f{resultado_str}\x1f{checksum_resposta}"
                     cliente_socket.send(resposta.encode("utf-8"))
 
                 else:
+                    if self.id == self.coordenador_id:
+                        print(" [INFO] Executando escrita e replicando")
+                        self.db.executar_query(sql_mensagem)
 
-                    print(f" [INFO] Redirecionando a query para o coordenador {self.coordenador_id}")
-                    resposta = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload)
-                    cliente_socket.send(resposta.encode("utf-8"))
+                        if any(cmd in sql_mensagem.upper() for cmd in ["INSERT", "UPDATE", "DELETE"]):
+                            print(" [INFO] Replicando alteração para os pares")
+                            for par in self.pares:
+                                threading.Thread(target=self.enviar_mensagem, 
+                                                 args=(par, "REPLICACAO", sql_mensagem)).start()                  
+
+                        msg_ok = json.dumps({"status": "OK", "mensagem": "Comando executado"})
+                        checksum_resposta = self.calcular_checksum(msg_ok)
+                        resposta = f"{self.id}\x1f{msg_ok}\x1f{checksum_resposta}"
+                        cliente_socket.send(resposta.encode("utf-8"))
+
+                    else:
+                        print(f" [INFO] Redirecionando a query para o coordenador {self.coordenador_id}")
+                        resposta = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", sql_mensagem)
+                        if resposta:
+                            cliente_socket.send(resposta.encode("utf-8"))
+                        else:
+                            erro_msg = json.dumps({"status": "ERRO", "mensagem": "Coordenador Indisponível"})
+                            cliente_socket.send(f"{self.id}\x1f{erro_msg}\x1f000".encode("utf-8"))
 
             elif tipo_mensagem == "REPLICACAO":
                 print(f" [REPLICACAO] Gravando no banco local: {payload['sql']}")
@@ -140,23 +157,13 @@ class NodeMiddleware:
 
             elif tipo_mensagem == "SYNC_REQ":
                 print(f" [SYNC] Nó {origem} solicitou sincronização.")
-                # implementar sync req
-
-                # dados_banco = self.db.executar_query("SELECT * FROM clientes")
-                # lista = dados_banco.get('dados', [])
-                #
-                # # Envia a resposta com os dados para a sincronização
-                # self.enviar_mensagem(origem, "SYNC_DATA", {"clientes": lista})
-                # print(f" [SYNC] {len(lista)} registros enviados para {origem}.")
+                
 
             elif tipo_mensagem == "SYNC_DATA":
                 print(" [SYNC] Recebendo dados.")
-                # implementar sync_data
-                # lista_clientes = payload['clientes']
-                # self.atualizar_banco_local(lista_clientes)
+           
             
             elif tipo_mensagem == "ELEICAO":
-                # O ID maior responde VIVO e inicia a eleição para se tornar coordenador
                 if int(self.id) > int(origem):
                     self.enviar_mensagem(origem, "VIVO", {})
                     self.iniciar_eleicao()
