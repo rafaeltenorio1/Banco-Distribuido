@@ -1,147 +1,153 @@
+import customtkinter as ctk
 import socket
 import json
-import random
 import hashlib
 import threading
-import customtkinter as ctk
+import random
 from datetime import datetime
 
-ctk.set_appearance_mode("Dark")  
-ctk.set_default_color_theme("dark-blue") 
+# Configuração Visual
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
+# Configuração de Rede
 NODES = [
-    {"ip": "10.159.0.56", "porta": 5001},
-    # {"ip": "10.159.0.101", "porta": 5001},
-    # {"ip": "10.159.0.252", "porta": 5001}
+    {"ip": "localhost", "porta": 5001},
+    {"ip": "localhost", "porta": 5002},
+    {"ip": "localhost", "porta": 5003}
 ]
 
-def calcular_checksum(payload):
-    dump = json.dumps(payload, sort_keys=True).encode()
-    return hashlib.md5(dump).hexdigest()
-
-class CupuacuClient(ctk.CTk):
+class ClientApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-
-        # Configuração da Janela Principal
-        self.title("Banco de Dados Distribuído")
-
-        self.geometry("700x650")
+        self.title("Terminal SQL Distribuído")
+        self.geometry("900x700")
+        
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1) 
+        self.grid_rowconfigure(2, weight=1)
 
-        # Cabeçalho
-        self.lbl_title = ctk.CTkLabel(self, text="DASHBOARD DO CLIENTE", 
-                                      font=("Roboto Medium", 20),
-                                      text_color="#4CB5F5") # Azul claro para contraste
-        self.lbl_title.grid(row=0, column=0, pady=(20, 10), sticky="ew")
+        # 1. Cabeçalho
+        self.header = ctk.CTkLabel(self, text="Terminal SQL - Banco Distribuído", font=("Roboto", 24, "bold"))
+        self.header.grid(row=0, column=0, pady=15, sticky="ew")
 
-        # Inserção de dados
-        self.frame_inputs = ctk.CTkFrame(self, corner_radius=15)
-        self.frame_inputs.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
-        self.frame_inputs.grid_columnconfigure(1, weight=1)
-
-        # Inputs
-        ctk.CTkLabel(self.frame_inputs, text="E-mail:", font=("Roboto", 12)).grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        self.email = ctk.CTkEntry(self.frame_inputs, placeholder_text="SELECT * FROM clientes;", height=35)
-        self.email.grid(row=1, column=1, padx=15, pady=5, sticky="ew")
-
-        # Botões de ação 
-        self.btn_insert = ctk.CTkButton(self.frame_inputs, text="ENVIAR QUERY", 
-                                        fg_color="#2CC985", hover_color="#229A65",
-                                        height=40, font=("Roboto", 12, "bold"),
-                                        command=lambda: self.run_async(self.fazer_insert))
-        self.btn_insert.grid(row=2, column=0, columnspan=2, padx=15, pady=(15, 10), sticky="ew")
-
-        # Terminal
-        self.lbl_log = ctk.CTkLabel(self, text="Terminal de Respostas", anchor="w", text_color="gray")
-        self.lbl_log.grid(row=2, column=0, padx=25, pady=(10,0), sticky="w")
-
-        self.txt_log = ctk.CTkTextbox(self, font=("Consolas", 13), activate_scrollbars=True)
-        self.txt_log.grid(row=3, column=0, padx=20, pady=(5, 20), sticky="nsew")
-        self.txt_log.configure(state="disabled") 
-
-        # Tags de cor manual 
-        self.log_message("Sistema iniciado. Pronto para conexão.", "info")
-
-    def log_message(self, message, type="info"):
+        # 2. Área de Input SQL
+        self.frame_input = ctk.CTkFrame(self)
+        self.frame_input.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
         
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.lbl_instrucao = ctk.CTkLabel(self.frame_input, text="Digite sua Query SQL (CREATE, SELECT, INSERT, SHOW...):", anchor="w")
+        self.lbl_instrucao.pack(fill="x", padx=10, pady=5)
         
-        # Definição de cores 
-        prefix = f"[{timestamp}] "
-        full_msg = f"{prefix} {message}\n"
+        # Caixa de texto para digitar o SQL (aceita multilinhas)
+        self.txt_sql = ctk.CTkTextbox(self.frame_input, height=100, font=("Consolas", 14))
+        self.txt_sql.pack(fill="x", padx=10, pady=5)
+        self.txt_sql.insert("0.0", "SELECT * FROM clientes;") # Texto padrão
         
-        self.txt_log.configure(state="normal")
-        self.txt_log.insert("end", full_msg)
-        self.txt_log.configure(state="disabled")
-        self.txt_log.see("end")
+        # Botões
+        self.btn_run = ctk.CTkButton(self.frame_input, text="EXECUTAR QUERY", 
+                                     fg_color="#0095C2", hover_color="#004696", 
+                                     height=40, font=("Roboto", 14, "bold"),
+                                     command=self.cmd_executar)
+        self.btn_run.pack(fill="x", padx=10, pady=2)
+        
+        # Atalho de teclado para executar
+        self.bind('<Control-Return>', lambda event: self.cmd_executar())
 
-    def run_async(self, func):
-        threading.Thread(target=func, daemon=True).start()
+        # 3. Log / Resultados
+        self.lbl_result = ctk.CTkLabel(self, text="Resultados / Logs:", anchor="w")
+        self.lbl_result.grid(row=2, column=0, padx=20, sticky="w")
 
-    def enviar_query(self, sql):
-        while True:
+        self.log_box = ctk.CTkTextbox(self, font=("Consolas", 12), state="disabled")
+        self.log_box.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="nsew")
+        
+        self.log_message("Sistema pronto. Conectado ao cluster.")
+
+    def log_message(self, msg):
+        self.log_box.configure(state="normal")
+        time_str = datetime.now().strftime("%H:%M:%S")
+        self.log_box.insert("end", f"[{time_str}] {msg}\n")
+        self.log_box.see("end")
+        self.log_box.configure(state="disabled")
+
+    def formatar_resultado(self, dados):
+        """Formata JSON/Dict para uma string bonita de tabela"""
+        if not dados:
+            return "Nenhum dado retornado."
+        
+        if isinstance(dados, list) and len(dados) > 0:
+            # Pega as chaves (colunas) do primeiro item
+            colunas = list(dados[0].keys())
+            header = " | ".join(colunas)
+            divisor = "-" * len(header) * 2
+            
+            linhas = [header, divisor]
+            for row in dados:
+                valores = [str(row[c]) for c in colunas]
+                linhas.append(" | ".join(valores))
+            
+            return "\n".join(linhas)
+        else:
+            return str(dados)
+
+    def criar_mensagem(self, tipo, payload):
+        payload_str = json.dumps(payload, sort_keys=True)
+        checksum = hashlib.md5(payload_str.encode("utf-8")).hexdigest()
+        return {
+            "tipo": tipo,
+            "origem": "CLIENT_GUI",
+            "payload": payload,
+            "checksum": checksum
+        }
+
+    def enviar_rede(self, sql):
+        def thread_task():
             node = random.choice(NODES)
-            self.log_message(f"Conectando a {node['ip']}...", "info")
-
+            self.log_message(f"Enviando para Nó {node['porta']}...")
+            
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(3) 
-                s.connect((node['ip'], node['porta']))
-            
-                payload = {"sql": sql}
-                mensagem = {
-                    "tipo": "QUERY_REQ",
-                    "origem": "GUI_CLIENT",
-                    "payload": payload,
-                    "checksum": calcular_checksum(payload)
-                }
-            
-                s.send(json.dumps(mensagem).encode())
-                resp_raw = s.recv(4096).decode()
-                s.close()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(10) # Timeout maior para queries pesadas
+                sock.connect((node['ip'], node['porta']))
+                
+                msg = self.criar_mensagem("QUERY_REQ", {"sql": sql})
+                sock.sendall(json.dumps(msg).encode("utf-8"))
+                
+                resp_bytes = sock.recv(65536) # Buffer grande
+                sock.close()
+                
+                if resp_bytes:
+                    resp = json.loads(resp_bytes.decode("utf-8"))
+                    payload = resp.get("payload", {})
+                    
+                    if resp.get("tipo") == "QUERY_RESP":
+                        status = payload.get("status", "UNKNOWN")
+                        self.log_message(f"Status: {status}")
+                        
+                        if "dados" in payload:
+                            tabela_formatada = self.formatar_resultado(payload["dados"])
+                            self.log_message(f"\n{tabela_formatada}\n")
+                        elif "mensagem" in payload:
+                            self.log_message(f"Resposta: {payload['mensagem']}")
+                    else:
+                        self.log_message(f"Erro remoto: {payload}")
+                else:
+                    self.log_message("Sem resposta do servidor (Timeout ou erro).")
 
-                resposta = json.loads(resp_raw)
-                self.processar_resposta(resposta, node['porta'])
-                break
             except Exception as e:
-                self.log_message(f"FALHA: Não foi possível conectar ao nó {node['porta']}", "error")
-                self.log_message(f"Sorteando cliente para conectar novamente", "error")
+                self.log_message(f"Erro na conexão: {e}")
 
-    def processar_resposta(self, resposta, porta):
-        status = resposta.get('resultado', {}).get('status')
-        node_exec = resposta.get('node_exec')
-        print(status) 
-        msg_header = f"[INFO] RESPOSTA RECEBIDA (Nó {node_exec}): Status [{status}]"
-        self.log_message(msg_header)
+        threading.Thread(target=thread_task, daemon=True).start()
 
-        if 'dados' in resposta.get('resultado', {}):
-            self.log_message("----------- DADOS -----------")
-            for linha in resposta['resultado']['dados']:
-                self.log_message(f" > {linha}")
-            self.log_message("-------------------------")
+    def cmd_executar(self):
+        # Pega o texto da caixa (do inicio "1.0" até o final "end")
+        sql = self.txt_sql.get("1.0", "end").strip()
         
-        if resposta.get('error'):
-            self.log_message(f"[ERRO] SQL: {resposta['error']}", "error")
-
-    def fazer_insert(self):
-        # nome = self.nome.get()
-        email = self.email.get()
-        
-        if not email:
-            self.log_message("Preencha todos os campos!", "error")
+        if not sql:
+            self.log_message("Digite uma query para executar.")
             return
-
-        sql = email 
-        self.enviar_query(sql)
         
-        # Limpa os campos na thread principal
-        self.email.delete(0, "end")
-
-    def fazer_select(self):
-        self.enviar_query("SELECT * FROM clientes")
+        self.log_message(f"Executando: {sql}")
+        self.enviar_rede(sql)
 
 if __name__ == "__main__":
-    app = CupuacuClient()
+    app = ClientApp()
     app.mainloop()
