@@ -4,7 +4,6 @@ import json
 import hashlib
 import time
 import sys
-from xmlrpc import server
 from db_manager import DBManager
 
 # Configuração dos hosts
@@ -14,8 +13,8 @@ NODES_CONFIG = {
     "3": {"ip": "localhost", "porta": 5003, "db_host": "localhost"},
 }
 
-DB_USER = "labsd"
-DB_PASS = "labsd"
+DB_USER = "root"
+DB_PASS = "admin"
 DB_NAME = "ddb"
 
 class NodeMiddleware:
@@ -27,68 +26,59 @@ class NodeMiddleware:
         self.config = NODES_CONFIG[self.id]
         self.peers = [nid for nid in NODES_CONFIG if nid != self.id]
 
-        #Banco de dados
-        print(f"[INFO] Conectando ao MySQL local em {self.config['db_host']}")
+        print("------------------------------------------------")
+        print(f"[INIT] Iniciando Nó {self.id}")
         self.db = DBManager(self.config['db_host'], DB_USER, DB_PASS, DB_NAME)
-
-        #Estado do nó
-        self.coordenador_id = self.id  # Inicialmente assume que é o coordenador
+        self.coordenador_id = self.id
         self.running = True
 
-    # ------- Protocolo de comunicação entre nós -------
-
+    # ------- Protocolo -------
     def criar_mensagem(self, tipo, payload=None):
-        #Cria o dicionario padrão para envio via JSON
-        if payload is None:
-            payload = {}
-        
+        if payload is None: payload = {}
         payload_str = json.dumps(payload, sort_keys=True)
-        checksum = hashlib.md5(payload_str.encode("utf-8")).hexdigest()\
-        
-        return {
-            "tipo": tipo, 
-            "origem": self.id,
-            "payload": payload,
-            "checksum": checksum
-        }
+        checksum = hashlib.md5(payload_str.encode("utf-8")).hexdigest()
+        return {"tipo": tipo, "origem": self.id, "payload": payload, "checksum": checksum}
 
     def validar_checksum(self, msg_dict):
         payload = msg_dict.get("payload", {})
         checksum_recebido = msg_dict.get("checksum", "")
-
         payload_str = json.dumps(payload, sort_keys=True)
-        checksum_calculado = hashlib.md5(payload_str.encode("utf-8")).hexdigest()
-        
-        return checksum_recebido == checksum_calculado
+        return checksum_recebido == hashlib.md5(payload_str.encode("utf-8")).hexdigest()
     
-    #--------- Comunicaçõ de Rede -----------
-
+    # --------- Rede -----------
     def enviar_mensagem(self, target_id, tipo, payload=None, esperar_resposta=False):
-        if target_id not in NODES_CONFIG:
-            return None
-        
+        if target_id not in NODES_CONFIG: return None
         target = NODES_CONFIG[target_id]
         msg = self.criar_mensagem(tipo, payload)
 
         try:
+            # print(f"[NET OUT] Enviando {tipo} para Nó {target_id}...") 
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
+            sock.settimeout(5) # Timeout maior para Dumps
             sock.connect((target['ip'], target['porta']))
-
-            msg_bytes = json.dumps(msg).encode("utf-8")
-            sock.send(msg_bytes)
+            sock.send(json.dumps(msg).encode("utf-8"))
 
             resposta = None
             if esperar_resposta:
-                resp_bytes = sock.recv(16384)
-                if resp_bytes:
-                    resposta = json.loads(resp_bytes.decode("utf-8"))
+                # Loop de leitura para mensagens grandes
+                chunks = []
+                while True:
+                    try:
+                        chunk = sock.recv(4096)
+                        if not chunk: break
+                        chunks.append(chunk)
+                    except socket.timeout:
+                        break
+                
+                if chunks:
+                    full_data = b''.join(chunks).decode("utf-8")
+                    resposta = json.loads(full_data)
+                    # print(f"[NET IN] Resposta recebida de {target_id} (Tamanho: {len(full_data)} bytes)")
             
             sock.close()
             return resposta
-        
         except Exception as e:
-            print(f"[INFO] Falha ao enviar para {target_id}: {e}")
+            print(f"[NET ERROR] Falha ao enviar para {target_id}: {e}")
             return None
 
     def start_server(self):
@@ -97,151 +87,179 @@ class NodeMiddleware:
         try:
             server.bind((self.config['ip'], self.config['porta']))            
             server.listen(5)
-            print(f"[INFO] Servidor Middleware rodando em {self.config['ip']}:{self.config['porta']}")
-            
+            print(f"[SERVER] Rodando em {self.config['ip']}:{self.config['porta']}")
             while self.running:
-                client_socket, addr = server.accept()
+                client_socket, _ = server.accept()
                 threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
-
         except Exception as e:
-            print(f" [ERRO] Erro ao iniciar servidor: {e}")
+            print(f"[SERVER FATAL] {e}")
             sys.exit(1)
 
     def handle_client(self, cliente_socket):
         try:
-            data = cliente_socket.recv(16384).decode("utf-8") 
-            if not data: return
-
+            # Leitura robusta
+            chunks = []
+            while True:
+                cliente_socket.settimeout(2.0)
+                try:
+                    chunk = cliente_socket.recv(4096)
+                    if not chunk: break
+                    chunks.append(chunk)
+                    if len(chunk) < 4096: break # Fim provável
+                except socket.timeout:
+                    break
+            
+            if not chunks: return
+            data = b''.join(chunks).decode("utf-8")
             msg = json.loads(data)
 
             if not self.validar_checksum(msg):
-                print(f"[ERRO] Checksum inválido de {msg.get('origem')}")
+                print(f"[SEC] Checksum inválido de {msg.get('origem')}")
                 return
             
             response = self.processar_mensagem(msg)
-
             if response:
                 cliente_socket.sendall(json.dumps(response).encode("utf-8"))
-        
-        except json.JSONDecodeError:
-            print(" [ERRO] Recebido JSON malformado.")
         except Exception as err:
-            print(f"[ERRO] Processando cliente: {err}")
+            print(f"[SERVER ERROR] {err}")
         finally:
             cliente_socket.close()
-            
-    def aplicar_dump(self, dump_dados):
-        print("[SYNC] Iniciando reconstrução do banco de dados...")
-        
-        # 1. Desliga verificação de chaves estrangeiras para poder apagar/criar sem erro de ordem
-        self.db.executar_query("SET FOREIGN_KEY_CHECKS = 0")
-        
-        # 2. Apaga todas as tabelas existentes (Limpeza)
-        res = self.db.executar_query("SHOW TABLES")
-        if res.get("status") == "OK":
-            tabelas_atuais = [list(r.values())[0] for r in res["dados"]]
-            for t in tabelas_atuais:
-                self.db.executar_query(f"DROP TABLE IF EXISTS {t}")
 
-        # 3. Recria tabelas e insere dados
-        for table_name, data in dump_dados.items():
-            print(f"[SYNC] Restaurando tabela: {table_name}")
-            
-            # Cria a tabela
-            create_sql = data.get("schema")
-            if create_sql:
-                self.db.executar_query(create_sql)
-            
-            # Insere os dados
-            rows = data.get("rows", [])
-            if rows:
-                for row in rows:
-                    # Monta o INSERT manualmente (Cuidado: SQL Injection simples aqui, ok para lab)
-                    colunas = list(row.keys())
-                    valores = []
-                    for v in row.values():
-                        if v is None:
-                            valores.append("NULL")
-                        else:
-                            # Escapa aspas simples para não quebrar o SQL
-                            val_str = str(v).replace("'", "''").replace("\\", "\\\\")
-                            valores.append(f"'{val_str}'")
-                    
-                    sql = f"INSERT INTO {table_name} ({', '.join(colunas)}) VALUES ({', '.join(valores)})"
-                    self.db.executar_query(sql)
+    # --------- LÓGICA DE APLICAÇÃO DO DUMP -----------
+    def aplicar_dump(self, dump_dados):
+        print("\n[SYNC START] Iniciando Restore do Banco...")
         
-        # 4. Religa as chaves estrangeiras
-        self.db.executar_query("SET FOREIGN_KEY_CHECKS = 1")
-        print("[SYNC] Banco de dados sincronizado com sucesso!")
-    
+        if not dump_dados:
+            print("[SYNC] Dump vazio.")
+            return
+
+        try:
+            self.db.executar_query("SET FOREIGN_KEY_CHECKS = 0")
+            
+            count_bancos = 0
+            
+            for key, data in dump_dados.items():
+                db_name = data.get("database")
+                table_name = data.get("table")
+                create_sql = data.get("schema")
+                rows = data.get("rows", [])
+                
+                # Validação
+                if not db_name or str(db_name) in ["None", "null"]:
+                    print(f"[SYNC SKIP] Chave inválida encontrada: {key}")
+                    continue
+
+                print(f"[SYNC STEP] Processando Banco: {db_name}")
+                
+                # 1. Cria Banco
+                res = self.db.executar_query(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+                if res['status'] == 'ERRO':
+                    print(f"   [!!!] Erro ao criar banco: {res['mensagem']}")
+                    continue
+                
+                if not table_name: 
+                    # É um banco vazio, termina aqui
+                    continue
+
+                # 2. Muda Contexto (USE)
+                res = self.db.executar_query(f"USE {db_name}")
+                if res['status'] == 'ERRO':
+                    print(f"   [!!!] Erro ao entrar no banco: {res['mensagem']}")
+                    continue
+
+                # 3. Cria Tabela
+                print(f"   -> Recriando tabela '{table_name}'...")
+                self.db.executar_query(f"DROP TABLE IF EXISTS {table_name}")
+                if create_sql:
+                    self.db.executar_query(create_sql)
+                
+                # 4. Insere Dados
+                if rows:
+                    print(f"   -> Inserindo {len(rows)} registros...")
+                    for row in rows:
+                        colunas = list(row.keys())
+                        valores = []
+                        for v in row.values():
+                            if v is None: valores.append("NULL")
+                            elif isinstance(v, (int, float)): valores.append(str(v))
+                            else:
+                                val_str = str(v).replace("'", "''").replace("\\", "\\\\")
+                                valores.append(f"'{val_str}'")
+                        
+                        sql = f"INSERT INTO {table_name} ({', '.join(colunas)}) VALUES ({', '.join(valores)})"
+                        self.db.executar_query(sql)
+
+            self.db.executar_query("SET FOREIGN_KEY_CHECKS = 1")
+            print("[SYNC END] Sincronização Finalizada!\n")
+
+        except Exception as e:
+            print(f"[SYNC FATAL] {e}")
+
+    # --------- Processamento de Mensagens -----------
     def processar_mensagem(self, msg):
         tipo = msg["tipo"]
         origem = msg["origem"]
         payload = msg["payload"]
 
-        # 1. Requisições do Cliente (Query)
         if tipo == "QUERY_REQ":
-            sql = payload.get("sql", "")
-            print(f"[QUERY] Recebida de {origem}: {sql}")
+            sql = payload.get("sql", "").strip()
+            print(f"[REQ] Query de {origem}: {sql[:50]}...")
 
-            read_keywords = ["SELECT", "SHOW", "DESCRIBE", "EXPLAIN"]
-            is_read = any(sql.strip().upper().startswith(k) for k in read_keywords)
+            sql_upper = sql.upper()
+            is_read = any(sql_upper.startswith(k) for k in ["SELECT", "SHOW", "DESCRIBE"])
 
             if is_read:
-                # Leitura pode ser feita em qualquer nó (eventual consistency)
-                resultado = self.db.executar_query(sql)
-                return self.criar_mensagem("QUERY_RESP", resultado)
+                # Leitura: Executa Local
+                res = self.db.executar_query(sql)
+                return self.criar_mensagem("QUERY_RESP", res)
             else:
-                # Escrita (INSERT/UPDATE) só no Coordenador
+                # Escrita
                 if self.id == self.coordenador_id:
-                    print(f"[ESCRITA] Sou coordenador. Executando e replicando.")
+                    print(f"[MASTER] Executando e Replicando: {sql[:50]}...")
                     res = self.db.executar_query(sql)
-
-                    # Replicar para os outros nós
-                    if res["status"] == "OK":
-                        self.replicar_dados(sql)
                     
+                    # Verifica erro antes de replicar
+                    deu_erro = False
+                    if isinstance(res, dict) and res.get("status") in ["ERRO", "ERROR"]: deu_erro = True
+                    
+                    if not deu_erro:
+                        self.replicar_dados(sql)
+                    else:
+                        print("[MASTER] Erro local. Não replicando.")
+
                     return self.criar_mensagem("QUERY_RESP", res)
                 else:
-                    print(f"[ESCRITA] Redirecionando para coordenador {self.coordenador_id}")
-                    # Repassa a requisição para o coordenador
+                    print(f"[SLAVE] Forwarding para Master {self.coordenador_id}")
                     resp = self.enviar_mensagem(self.coordenador_id, "QUERY_REQ", payload, esperar_resposta=True)
-                    if resp:
-                        return resp
-                    else:
-                        return self.criar_mensagem("ERRO", {"mensagem": "Coordenador indisponível"})
-        
-        # 2. Replicação
+                    return resp if resp else self.criar_mensagem("ERRO", {"mensagem": "Master OFF"})
+
         elif tipo == "REPLICACAO":
             sql = payload.get("sql")
-            print(f"[REPLICA] Aplicando: {sql}")
+            print(f"[REPLICA] Gravando: {sql[:50]}...")
             self.db.executar_query(sql)
-            return self.criar_mensagem("ACK")   
+            return self.criar_mensagem("ACK")    
 
-        # 3. Eleição e Heartbeat
-        elif tipo == "HEARTBEAT":
-            return self.criar_mensagem("VIVO")
+        elif tipo == "SYNC_REQ":
+            print(f"[SYNC] Nó {origem} pediu dados. Gerando dump...")
+            dump = self.db.get_full_dump() 
+            return self.criar_mensagem("SYNC_DATA", dump)
+        
+        elif tipo == "SYNC_DATA":
+            print(f"[SYNC] Recebi dados do Master.")
+            if payload: self.aplicar_dump(payload)
+            return None
 
-        elif tipo == "ELEICAO":
-            print(f"[ELEIÇÃO] Recebida de {origem}")     
-            if int(self.id) > int(origem):
-                threading.Thread(target=self.inicar_eleicao).start()
-                return self.criar_mensagem("VIVO")
-            
+        # Mensagens de controle simples (sem log excessivo)
+        elif tipo == "HEARTBEAT": return self.criar_mensagem("VIVO")
+        elif tipo == "QUEM_E_O_CHEFE":
+            if self.id == self.coordenador_id: return self.criar_mensagem("EU_SOU_O_CHEFE")
         elif tipo == "COORDENADOR":
             self.coordenador_id = origem
-            print(f"[ELEICAO] Novo coordenador reconhecido: {origem}")
-
-        # 4. Sincronização (Novo nó entrando)
-        elif tipo == "QUEM_E_O_CHEFE":
-            if self.id == self.coordenador_id:
-                return self.criar_mensagem("EU_SOU_O_CHEFE")
-        
-        elif tipo == "SYNC_REQ":
-            print(f"[SYNC] Recebida solicitação de {origem}. Gerando dump completo...")
-            # Pega o banco inteiro agora
-            dump_completo = self.db.get_full_dump()
-            return self.criar_mensagem("SYNC_DATA", dump_completo)
+            print(f"[INFO] Novo Master: {origem}")
+        elif tipo == "ELEICAO":
+             if int(self.id) > int(origem):
+                threading.Thread(target=self.iniciar_eleicao).start()
+                return self.criar_mensagem("VIVO")
         
         return None
 
@@ -250,85 +268,58 @@ class NodeMiddleware:
             threading.Thread(target=self.enviar_mensagem, args=(peer, "REPLICACAO", {"sql": sql})).start()
             
     def iniciar_eleicao(self):
-        print(f" [ELEIÇÃO] Iniciando processo de eleição")
+        print(f"[ELEIÇÃO] Iniciando...")
         sou_o_maior = True
-
-    # Pergunta para todos com ID maior se estão vivos        
         for peer in self.peers:
             if int(peer) > int(self.id):
                 resp = self.enviar_mensagem(peer, "ELEICAO", esperar_resposta=True)
-                if resp and resp["tipo"] == "ALIVE":
+                if resp and resp["tipo"] == "VIVO":
                     sou_o_maior = False
                     break
-        
-        if sou_o_maior:
-            self.tornar_coordenador()
+        if sou_o_maior: self.tornar_coordenador()
     
     def tornar_coordenador(self):
         self.coordenador_id = self.id
-        print(f" [ELEIÇÃO] Eu sou o novo coordenador (Nó {self.id})")
-        for peer in self.peers:
-            self.enviar_mensagem(peer, "COORDENADOR")
+        print(f"[MASTER] Assumindo Liderança!")
+        for peer in self.peers: self.enviar_mensagem(peer, "COORDENADOR")
     
     def monitorar_coordenador(self):
-        print(" [MONITOR] Iniciando.")
+        print("[MONITOR] Ativo.")
         while self.running:
             time.sleep(5)
-            if self.id == self.coordenador_id:
-                continue  # Coordenador não monitora a si mesmo
-
+            if self.id == self.coordenador_id: continue 
             resp = self.enviar_mensagem(self.coordenador_id, "HEARTBEAT", esperar_resposta=True)
             if not resp:
-                print(f"[ALERTA] Coordenador {self.coordenador_id} sumiu. Convocando eleição.")
+                print(f"[ALERTA] Master {self.coordenador_id} caiu!")
                 self.iniciar_eleicao()
     
-
     def join_cluster(self):
-        print("[JOIN] Entrando no cluster.")    
-        coordenador_encontrado = None
-        print("[JOIN] Buscando coordenador na rede")
+        print("[JOIN] Entrando no cluster...")    
+        coord = None
         for peer in self.peers:
             resp = self.enviar_mensagem(peer, "QUEM_E_O_CHEFE", esperar_resposta=True)
             if resp and resp["tipo"] == "EU_SOU_O_CHEFE":
-                coordenador_encontrado = peer
+                coord = peer
                 break
-                
-        if coordenador_encontrado:
-            self.coordenador_id = coordenador_encontrado
-            print(f"[JOIN] Coordenador é {self.coordenador_id}. Pedindo sincronização.")
-            # Pede dados
-            resp = self.enviar_mensagem(self.coordenador_id, "SYNC_REQ", esperar_resposta=True)
-
-            if resp and resp["tipo"] == "SYNC_DATA":
-                dump_recebido = resp.get("payload", {})
-                if dump_recebido:
-                    self.aplicar_dump(dump_recebido)
-                else:
-                    print("[JOIN] Recebido dump vazio ou inválido.")
+        if coord:
+            self.coordenador_id = coord
+            print(f"[JOIN] Master encontrado: {coord}. Pedindo Sync...")
+            self.enviar_mensagem(self.coordenador_id, "SYNC_REQ", esperar_resposta=True)
+            # Obs: A resposta vem como uma nova msg SYNC_DATA processada no handle_client
         else:
-            print("[JOIN] Ninguém respondeu. Assumindo liderança.")
+            print("[JOIN] Sozinho na rede. Viro Master.")
             self.coordenador_id = self.id
   
     def run(self):
-        # 1. Inicia o servidor 
         threading.Thread(target=self.start_server, daemon=True).start()
-        time.sleep(1) # Espera servidor subir
-
-        # 2. Entra no Cluter
+        time.sleep(1)
         self.join_cluster()
-
-        # 3. Monitora
         threading.Thread(target=self.monitorar_coordenador, daemon=True).start()
-        
-        print(f"[INFO] Nó {self.id} rodando (Coord: {self.coordenador_id}).")
-
         try:
             while True: time.sleep(1)
         except KeyboardInterrupt:
-            print("Saindo.")
+            print("Encerrando.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Uso: python middleware.py <ID_NO>")
-    else:
-        NodeMiddleware(sys.argv[1]).run()
+    if len(sys.argv) < 2: print("Uso: python middleware.py <ID_NO>")
+    else: NodeMiddleware(sys.argv[1]).run()
