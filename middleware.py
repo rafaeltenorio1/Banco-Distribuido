@@ -304,8 +304,12 @@ class NodeMiddleware:
         if coord:
             self.coordenador_id = coord
             print(f"[JOIN] Master encontrado: {coord}. Pedindo Sync...")
-            self.enviar_mensagem(self.coordenador_id, "SYNC_REQ", esperar_resposta=True)
-            # Obs: A resposta vem como uma nova msg SYNC_DATA processada no handle_client
+            resp = self.enviar_mensagem(self.coordenador_id, "SYNC_REQ", esperar_resposta=True)
+            
+            if resp and resp["tipo"] == "SYNC_DATA":
+                self.aplicar_dump(resp["payload"])
+            else: 
+                print("[JOIN] Falha ao receber dados de sincronização.") 
         else:
             print("[JOIN] Sozinho na rede. Viro Master.")
             self.coordenador_id = self.id
